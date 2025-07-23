@@ -1047,7 +1047,7 @@ func (api *API) deleteLabelHandler(w http.ResponseWriter, r *http.Request) {
 			err = nil // delete is idempotent
 		}
 	}
-
+	log.Printf("DEBUG: DELETE LABEL: %s %s %s (caller=%+v request=%+v) diff=%+v ", rc.entityType, rc.entityId, label, rc.caller, r, diff)
 reply:
 	api.WriteResult(rc, w, diff, err)
 }
