@@ -1037,6 +1037,7 @@ func (api *API) deleteLabelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	rc.gm.IncLabel(metrics.LabelDelete, label)
 	if err = api.validate.DeleteLabel(label); err != nil {
+		log.Printf("DEBUG: DELETE LABEL: Error validating label: %s %s %s (caller=%+v request=%+v) err=%+v", rc.entityType, rc.entityId, label, rc.caller, r, err)
 		goto reply
 	}
 
@@ -1231,7 +1232,7 @@ func (api *API) WriteResult(rc *req, w http.ResponseWriter, ids interface{}, err
 	var httpStatus = http.StatusInternalServerError
 	var wr etre.WriteResult
 	var writes []etre.Write
-
+	log.Printf("DEBUG: API WRITE RESULT: %v", ids)
 	// Map error to etre.Error
 	if err != nil {
 		log.Printf("API WRITE ERROR: %v", err)
