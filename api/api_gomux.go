@@ -1040,6 +1040,7 @@ func (api *API) deleteLabelHandler(w http.ResponseWriter, r *http.Request) {
 		goto reply
 	}
 
+	log.Printf("DEBUG: DELETE LABEL: %s %s %s (caller=%+v request=%+v) writeops=%+v", rc.entityType, rc.entityId, label, rc.caller, r, rc.wo)
 	// Delete label from entity
 	diff, err = api.es.DeleteLabel(ctx, rc.wo, label)
 	if err != nil {
