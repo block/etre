@@ -1304,6 +1304,7 @@ func (api *API) WriteResult(rc *req, w http.ResponseWriter, ids interface{}, err
 	}
 
 	// Map writes to []etre.Write
+	log.Printf("DEBUG: API WRITE RESULT: %v", ids)
 	if ids != nil {
 		switch ids.(type) {
 		case []etre.Entity:
@@ -1337,7 +1338,17 @@ func (api *API) WriteResult(rc *req, w http.ResponseWriter, ids interface{}, err
 			// Entity from DeleteLabel
 			diff := ids.(etre.Entity)
 			// _id from db is primitive.ObjectID, convert to string
-			id := diff["_id"].(primitive.ObjectID).Hex()
+			id := "unknown"
+			if diff["_id"] != nil {
+				if oid, ok := diff["_id"].(primitive.ObjectID); ok {
+					id = oid.Hex()
+				} else {
+					log.Printf("DEBUG: DELETE LABEL: _id is not ObjectID: %T %v", diff["_id"], diff["_id"])
+				}
+			} else {
+				log.Printf("DEBUG: DELETE LABEL: no _id in diff: %v", diff)
+			}
+			//id := diff["_id"].(primitive.ObjectID).Hex()
 			writes = []etre.Write{
 				{
 					EntityId: id,
