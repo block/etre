@@ -4,6 +4,7 @@ package entity
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -285,8 +286,9 @@ func (s store) DeleteLabel(ctx context.Context, wo WriteOp, label string) (etre.
 	if !ok {
 		panic("invalid entity type passed to DeleteLabel: " + wo.EntityType)
 	}
-
-	id, _ := primitive.ObjectIDFromHex(wo.EntityId)
+	log.Printf("DEBUG: DeleteLabel: %s %s %s", wo.EntityType, wo.EntityId, label)
+	id, err := primitive.ObjectIDFromHex(wo.EntityId)
+	log.Printf("DEBUG: DeleteLabel: id=%s err=%v", id.Hex(), err)
 	filter := bson.M{"_id": id}
 	update := bson.M{
 		"$unset": bson.M{label: ""}, // removes label, Mongo expects "" (see $unset docs)
@@ -296,7 +298,7 @@ func (s store) DeleteLabel(ctx context.Context, wo WriteOp, label string) (etre.
 		SetProjection(bson.M{"_id": 1, "_type": 1, "_rev": 1, label: 1}).
 		SetReturnDocument(options.Before)
 	var old etre.Entity
-	err := c.FindOneAndUpdate(ctx, filter, update, opts).Decode(&old)
+	err = c.FindOneAndUpdate(ctx, filter, update, opts).Decode(&old)
 	if err != nil {
 		return nil, s.dbError(ctx, err, "db-update")
 	}
