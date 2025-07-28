@@ -299,6 +299,7 @@ func (s store) DeleteLabel(ctx context.Context, wo WriteOp, label string) (etre.
 		SetReturnDocument(options.Before)
 	var old etre.Entity
 	err = c.FindOneAndUpdate(ctx, filter, update, opts).Decode(&old)
+	log.Printf("DEBUG: DeleteLabel: old=%v err=%v", old, err)
 	if err != nil {
 		return nil, s.dbError(ctx, err, "db-update")
 	}

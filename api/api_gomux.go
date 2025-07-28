@@ -1271,11 +1271,13 @@ func (api *API) WriteResult(rc *req, w http.ResponseWriter, ids interface{}, err
 				insertErr.Message += " (db err: " + v.Err.Error() + ")"
 				wr.Error = &insertErr
 			case "db-update":
+				log.Printf("DEBUG: DB update: v: %v, err: %v", v, v.Err.Error())
 				updateErr := ErrDBUpdateFailed
 				updateErr.EntityId = v.EntityId
 				updateErr.Message += " (db err: " + v.Err.Error() + ")"
 				wr.Error = &updateErr
 			default:
+				log.Printf("DEBUG: default error: %v", v)
 				wr.Error = &etre.Error{
 					Message:    v.Err.Error(),
 					Type:       v.Type,
