@@ -770,9 +770,9 @@ func TestDeleteLabelEntityNotFound(t *testing.T) {
 
 func TestDeleteLabelError(t *testing.T) {
 	// Test that DELETE /.../labels/:label works correctly when the diff returned
-	// from the store returns an error. This can happen. The API
-	// should handle it gracefully by returning an empty EntityId in the
-	// write result.
+	// from the store returns an error. This can happen for example when deleting
+	// a required label. The API should handle it gracefully by returning an empty
+	// EntityId in the write result.
 	store := mock.EntityStore{
 		DeleteLabelFunc: func(ctx context.Context, wo entity.WriteOp, label string) (etre.Entity, error) {
 			// Simulate a diff without an _id.
