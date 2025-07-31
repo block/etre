@@ -1332,10 +1332,14 @@ func (api *API) WriteResult(rc *req, w http.ResponseWriter, ids interface{}, err
 				httpStatus = http.StatusCreated
 			}
 		case etre.Entity:
+			var id string // default empty string
 			// Entity from DeleteLabel
 			diff := ids.(etre.Entity)
+
 			// _id from db is primitive.ObjectID, convert to string
-			id := diff["_id"].(primitive.ObjectID).Hex()
+			if diff != nil && diff["_id"] != nil {
+				id = diff["_id"].(primitive.ObjectID).Hex()
+			}
 			writes = []etre.Write{
 				{
 					EntityId: id,

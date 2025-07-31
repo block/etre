@@ -736,3 +736,76 @@ func TestDeleteLabel(t *testing.T) {
 		Caller: auth.Caller{Name: "test", MetricGroups: []string{"test"}},
 	}}, server.auth.AuthorizeArgs)
 }
+
+func TestDeleteLabelEntityNotFound(t *testing.T) {
+	// Test that DELETE /.../labels/:label is idempotent and returns HTTP 200 OK
+	// when the entity does not exist.
+	store := mock.EntityStore{
+		DeleteLabelFunc: func(ctx context.Context, wo entity.WriteOp, label string) (etre.Entity, error) {
+			// Simulate entity not found. DeleteLabel returns (nil, etre.ErrEntityNotFound).
+			// The handler then sets err = nil because DELETE is idempotent.
+			return nil, etre.ErrEntityNotFound
+		},
+	}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entity/" + entityType + "/" + testEntityIds[0] +
+		"/labels/foo"
+
+	var gotWR etre.WriteResult
+	statusCode, err := test.MakeHTTPRequest("DELETE", etreurl, nil, &gotWR)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, statusCode)
+	expectWrite := []etre.Write{{
+		EntityId: "",
+		URI:      addr + etre.API_ROOT + "/entity/",
+		Diff:     nil,
+	},
+	}
+	assert.Equal(t, expectWrite, gotWR.Writes)
+	assert.Nil(t, gotWR.Error)
+}
+
+func TestDeleteLabelError(t *testing.T) {
+	// Test that DELETE /.../labels/:label works correctly when the diff returned
+	// from the store returns an error. This can happen for example when deleting
+	// a required label. The API should handle it gracefully by returning an empty
+	// EntityId in the write result.
+	store := mock.EntityStore{
+		DeleteLabelFunc: func(ctx context.Context, wo entity.WriteOp, label string) (etre.Entity, error) {
+			// Simulate a diff without an _id.
+			return nil, fmt.Errorf("some error")
+		},
+	}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entity/" + entityType + "/" + testEntityIds[0] +
+		"/labels/foo"
+
+	var gotWR etre.WriteResult
+	statusCode, err := test.MakeHTTPRequest("DELETE", etreurl, nil, &gotWR)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusInternalServerError, statusCode)
+	require.NotNil(t, gotWR.Writes)
+	require.Len(t, gotWR.Writes, 1)
+
+	// Because the diff had no _id, the EntityId is empty string.
+	// The diff from the mock is returned.
+	expectWrite := etre.Write{
+		EntityId: "",
+		URI:      addr + etre.API_ROOT + "/entity/",
+		Diff:     nil,
+	}
+	expectedError := &etre.Error{
+		Type:       "unhandled-error",
+		Message:    "some error",
+		EntityId:   "",
+		HTTPStatus: http.StatusInternalServerError,
+	}
+	assert.Equal(t, expectWrite, gotWR.Writes[0])
+	assert.Equal(t, expectedError, gotWR.Error)
+}
