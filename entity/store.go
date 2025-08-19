@@ -4,12 +4,12 @@ package entity
 
 import (
 	"context"
+	"errors"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/square/etre"
 	"github.com/square/etre/cdc"
@@ -58,7 +58,17 @@ func (s store) ReadEntities(ctx context.Context, entityType string, q query.Quer
 	// "es -u node.metacluster zone=pd" returns a list of unique metacluster names.
 	// This is 10x faster than "es node.metacluster zone=pd | sort -u".
 	if len(f.ReturnLabels) == 1 && f.Distinct {
-		values, err := c.Distinct(ctx, f.ReturnLabels[0], Filter(q))
+		dr := c.Distinct(ctx, f.ReturnLabels[0], Filter(q))
+		if err := dr.Err(); err != nil {
+			nfe := mongo.ErrNoDocuments
+			if errors.Is(err, nfe) {
+				// No documents found, return empty slice
+				return []etre.Entity{}, nil
+			}
+			return nil, s.dbError(ctx, err, "db-read-distinct")
+		}
+		var values []string
+		err := dr.Decode(&values)
 		if err != nil {
 			return nil, s.dbError(ctx, err, "db-read-distinct")
 		}
@@ -122,7 +132,7 @@ func (s store) CreateEntities(ctx context.Context, wo WriteOp, entities []etre.E
 
 	now := time.Now().UnixNano()
 	for i := range entities {
-		entities[i]["_id"] = primitive.NewObjectID()
+		entities[i]["_id"] = bson.NewObjectID()
 		entities[i]["_type"] = wo.EntityType
 		entities[i]["_rev"] = int64(0)
 		entities[i]["_created"] = now
@@ -132,7 +142,7 @@ func (s store) CreateEntities(ctx context.Context, wo WriteOp, entities []etre.E
 		if err != nil {
 			return newIds, s.dbError(ctx, err, "db-insert")
 		}
-		id := res.InsertedID.(primitive.ObjectID)
+		id := res.InsertedID.(bson.ObjectID)
 		newIds = append(newIds, id.Hex())
 
 		// Create a CDC event.
@@ -195,7 +205,7 @@ func (s store) UpdateEntities(ctx context.Context, wo WriteOp, q query.Query, pa
 	}
 	opts := options.FindOneAndUpdate().SetProjection(p)
 
-	nextId := map[string]primitive.ObjectID{}
+	nextId := map[string]bson.ObjectID{}
 	for cursor.Next(ctx) {
 		if err := cursor.Decode(&nextId); err != nil {
 			return diffs, s.dbError(ctx, err, "db-cursor-decode")
@@ -222,7 +232,7 @@ func (s store) UpdateEntities(ctx context.Context, wo WriteOp, q query.Query, pa
 
 		cp := cdcPartial{
 			op:  "u",
-			id:  orig["_id"].(primitive.ObjectID),
+			id:  orig["_id"].(bson.ObjectID),
 			rev: orig.Rev() + 1,
 			old: &old,
 			new: &patch,
@@ -266,7 +276,7 @@ func (s store) DeleteEntities(ctx context.Context, wo WriteOp, q query.Query) ([
 		deleted = append(deleted, old)
 		ce := cdcPartial{
 			op:  "d",
-			id:  old["_id"].(primitive.ObjectID),
+			id:  old["_id"].(bson.ObjectID),
 			old: &old,
 			new: nil,
 			rev: old.Rev() + 1,
@@ -286,7 +296,7 @@ func (s store) DeleteLabel(ctx context.Context, wo WriteOp, label string) (etre.
 		panic("invalid entity type passed to DeleteLabel: " + wo.EntityType)
 	}
 
-	id, _ := primitive.ObjectIDFromHex(wo.EntityId)
+	id, _ := bson.ObjectIDFromHex(wo.EntityId)
 	filter := bson.M{"_id": id}
 	update := bson.M{
 		"$unset": bson.M{label: ""}, // removes label, Mongo expects "" (see $unset docs)
@@ -322,7 +332,7 @@ func (s store) DeleteLabel(ctx context.Context, wo WriteOp, label string) (etre.
 
 	cp := cdcPartial{
 		op:  "u",
-		id:  old["_id"].(primitive.ObjectID),
+		id:  old["_id"].(bson.ObjectID),
 		new: &new,
 		old: &old,
 		rev: old.Rev() + 1,
@@ -355,7 +365,7 @@ func (s store) dbError(ctx context.Context, err error, errType string) error {
 // which makes a complete CDCEvent from the partial and a WriteOp.
 type cdcPartial struct {
 	op  string
-	id  primitive.ObjectID
+	id  bson.ObjectID
 	old *etre.Entity
 	new *etre.Entity
 	rev int64

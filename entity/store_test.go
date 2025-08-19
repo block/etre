@@ -9,10 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/square/etre"
 	"github.com/square/etre/config"
@@ -51,7 +50,7 @@ func setup(t *testing.T, cdcm *mock.CDCStore) entity.Store {
 
 	// Create unique index on "x"
 	iv := nodesColl.Indexes()
-	if _, err := iv.DropAll(context.TODO()); err != nil {
+	if err := iv.DropAll(context.TODO()); err != nil {
 		// Don't error; Mongo returns an error if the namespace doesn't exist,
 		// which is what we want, so it's not an error in this context
 		t.Log(err)
@@ -73,7 +72,7 @@ func setup(t *testing.T, cdcm *mock.CDCStore) entity.Store {
 	require.NoError(t, err)
 	require.Len(t, res.InsertedIDs, len(testNodes), "mongo-driver returned %d doc ids, expected %d", len(res.InsertedIDs), len(testNodes))
 	for i, id := range res.InsertedIDs {
-		testNodes[i]["_id"] = id.(primitive.ObjectID)
+		testNodes[i]["_id"] = id.(bson.ObjectID)
 	}
 
 	testConfig := config.EntityConfig{
@@ -186,6 +185,22 @@ func TestReadEntitiesFilterDistinct(t *testing.T) {
 	assert.Equal(t, expect, got)
 }
 
+func TestReadEntitiesFilterDistinctNoResult(t *testing.T) {
+	// Test that etre.QueryFilter{Distinct: true} returns an empty list
+	// if no rows match the query.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("BOGUS") // test nodes do not have the label
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		ReturnLabels: []string{"BOGUS"}, // only works with 1 return label
+		Distinct:     true,
+	}
+	got, err := store.ReadEntities(context.Background(), entityType, q, f)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
 func TestReadEntitiesFilterReturnLabels(t *testing.T) {
 	// Test that etre.QueryFilter{ReturnLabels: []string{x}} returns only that
 	// label and not the others (y, z, bar, foo). We'll select/match by label y
@@ -248,9 +263,9 @@ func TestCreateEntitiesMultiple(t *testing.T) {
 	assert.Len(t, ids, len(testData))
 
 	// Verify that the last CDC event we create is as expected.
-	id1, _ := primitive.ObjectIDFromHex(ids[0])
-	id2, _ := primitive.ObjectIDFromHex(ids[1])
-	id3, _ := primitive.ObjectIDFromHex(ids[2])
+	id1, _ := bson.ObjectIDFromHex(ids[0])
+	id2, _ := bson.ObjectIDFromHex(ids[1])
+	id3, _ := bson.ObjectIDFromHex(ids[2])
 
 	createTime, ok := (*gotEvents[0].New)["_created"].(int64)
 	require.True(t, ok, "expected _created to be int64, got %T", (*gotEvents[0].New)["_created"])
@@ -322,7 +337,7 @@ func TestCreateEntitiesMultiplePartialSuccess(t *testing.T) {
 	assert.Len(t, ids, 1)
 
 	// Only x=5 written/inserted, so only a CDC event for it
-	id1, _ := primitive.ObjectIDFromHex(ids[0])
+	id1, _ := bson.ObjectIDFromHex(ids[0])
 	upd1 := (*gotEvents[0].New)["_updated"].(int64)
 	expectEvents := []etre.CDCEvent{
 		{
@@ -425,9 +440,9 @@ func TestUpdateEntities(t *testing.T) {
 		gotEvents[i].Id = ""
 		gotEvents[i].Ts = 0
 	}
-	id1, _ := testNodes[0]["_id"].(primitive.ObjectID)
-	id2, _ := testNodes[1]["_id"].(primitive.ObjectID)
-	id3, _ := testNodes[2]["_id"].(primitive.ObjectID)
+	id1, _ := testNodes[0]["_id"].(bson.ObjectID)
+	id2, _ := testNodes[1]["_id"].(bson.ObjectID)
+	id3, _ := testNodes[2]["_id"].(bson.ObjectID)
 	upd1 := (*gotEvents[0].New)["_updated"].(int64)
 	upd2 := (*gotEvents[1].New)["_updated"].(int64)
 	upd3 := (*gotEvents[2].New)["_updated"].(int64)
@@ -492,7 +507,7 @@ func TestUpdateEntitiesById(t *testing.T) {
 
 	// ----------------------------------------------------------------------
 	// This matches first test node
-	q, _ := query.Translate("_id=" + testNodes[0]["_id"].(primitive.ObjectID).Hex())
+	q, _ := query.Translate("_id=" + testNodes[0]["_id"].(bson.ObjectID).Hex())
 	patch := etre.Entity{"y": "y"} // y=a -> y=y
 	wo1 := entity.WriteOp{
 		EntityType: entityType,
@@ -553,9 +568,9 @@ func TestUpdateEntitiesById(t *testing.T) {
 		gotEvents[i].Id = ""
 		gotEvents[i].Ts = 0
 	}
-	id1, _ := testNodes[0]["_id"].(primitive.ObjectID)
-	id2, _ := testNodes[1]["_id"].(primitive.ObjectID)
-	id3, _ := testNodes[2]["_id"].(primitive.ObjectID)
+	id1, _ := testNodes[0]["_id"].(bson.ObjectID)
+	id2, _ := testNodes[1]["_id"].(bson.ObjectID)
+	id3, _ := testNodes[2]["_id"].(bson.ObjectID)
 	upd1 := (*gotEvents[0].New)["_updated"].(int64)
 	upd2 := (*gotEvents[1].New)["_updated"].(int64)
 	upd3 := (*gotEvents[2].New)["_updated"].(int64)
@@ -666,9 +681,9 @@ func TestDeleteEntities(t *testing.T) {
 		gotEvents[i].Id = ""
 		gotEvents[i].Ts = 0
 	}
-	id1, _ := testNodes[0]["_id"].(primitive.ObjectID)
-	id2, _ := testNodes[1]["_id"].(primitive.ObjectID)
-	id3, _ := testNodes[2]["_id"].(primitive.ObjectID)
+	id1, _ := testNodes[0]["_id"].(bson.ObjectID)
+	id2, _ := testNodes[1]["_id"].(bson.ObjectID)
+	id3, _ := testNodes[2]["_id"].(bson.ObjectID)
 	expectEvent := []etre.CDCEvent{
 		{
 			EntityId:   id1.Hex(),
@@ -714,7 +729,7 @@ func TestDeleteLabel(t *testing.T) {
 
 	wo := entity.WriteOp{
 		EntityType: entityType,
-		EntityId:   testNodes[0]["_id"].(primitive.ObjectID).Hex(),
+		EntityId:   testNodes[0]["_id"].(bson.ObjectID).Hex(),
 		Caller:     username,
 	}
 	gotOld, err := store.DeleteLabel(context.Background(), wo, "foo")
@@ -746,7 +761,7 @@ func TestDeleteLabel(t *testing.T) {
 		gotEvents[i].Id = ""
 		gotEvents[i].Ts = 0
 	}
-	id1, _ := testNodes[0]["_id"].(primitive.ObjectID)
+	id1, _ := testNodes[0]["_id"].(bson.ObjectID)
 	expectedEventNew := etre.Entity{
 		"_id":   testNodes[0]["_id"],
 		"_type": testNodes[0]["_type"],
