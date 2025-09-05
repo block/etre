@@ -8,7 +8,7 @@ require (
 	github.com/alexflint/go-arg v1.5.1
 	github.com/daniel-nichter/go-metrics v1.0.1
 	github.com/go-test/deep v1.1.1
-	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e
+	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 	github.com/gorilla/websocket v1.5.3
 	github.com/stretchr/testify v1.9.0
 	github.com/swaggo/http-swagger v1.3.4
