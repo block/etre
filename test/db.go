@@ -24,7 +24,12 @@ func DbCollections(entityTypes []string) (*mongo.Client, map[string]*mongo.Colle
 	}
 	coll := map[string]*mongo.Collection{}
 	for _, t := range entityTypes {
-		coll[t] = client.Database(database).Collection(t)
+		if t == "cdc" {
+			cdcOpts := options.Collection().SetBSONOptions(&options.BSONOptions{ObjectIDAsHexString: true}) // Because etre.CDCEvent has string _id, not bson.ObjectID
+			coll[t] = client.Database(database).Collection(t, cdcOpts)
+		} else {
+			coll[t] = client.Database(database).Collection(t)
+		}
 	}
 	return client, coll, nil
 }
