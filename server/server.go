@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"github.com/square/etre"
 	"github.com/square/etre/api"
@@ -64,7 +65,8 @@ func (s *Server) Boot(configFile string) error {
 			return fmt.Errorf("cannot connect to CDC datasource: %s", err)
 		}
 		s.cdcDbClient = cdcClient
-		cdcColl := cdcClient.Database(cfg.Datasource.Database).Collection(config.CDC_COLLECTION)
+		cdcOpts := options.Collection().SetBSONOptions(&options.BSONOptions{ObjectIDAsHexString: true}) // Because etre.CDCEvent has string _id, not bson.ObjectID
+		cdcColl := cdcClient.Database(cfg.Datasource.Database).Collection(config.CDC_COLLECTION, cdcOpts)
 
 		// Store
 		wrp := cdc.RetryPolicy{

@@ -113,8 +113,10 @@ func TestRead(t *testing.T) {
 func TestWriteSuccess(t *testing.T) {
 	cdcs := setup(t, "", cdc.NoRetryPolicy)
 
+	// Note we don't explicitly set ID here, so that MongoDB will generate an _id for us.
+	// This is the same behavior as the actual store implementation, which does not set the _id and
+	// allows MongoDB to generate it.
 	event := etre.CDCEvent{
-		Id:         "abc",
 		Ts:         54,
 		Op:         "i",
 		Caller:     "mike",
@@ -140,6 +142,19 @@ func TestWriteSuccess(t *testing.T) {
 	actualEvents, err := cdcs.Read(filter)
 	require.NoError(t, err)
 	assert.Len(t, actualEvents, 1)
+
+	// MongoDB auto-generates the _id column since we didn't provide one in `event` above.
+	// This is the same behavior as the actual store implementation, which does not set the _id and
+	// allows MongoDB to generate it.
+	//
+	// Since we don't know what the generated _id will be, we can't compare the entire event directly.
+	// Instead, verify that the _id is a valid ObjectID and then clear it so we can compare the rest
+	// of the event we read (in actualEvents[0]) with the original `event` above.
+	_, err = bson.ObjectIDFromHex(actualEvents[0].Id)
+	require.NoError(t, err)
+	actualEvents[0].Id = ""
+
+	// Compare the rest of the event
 	assert.Equal(t, event, actualEvents[0])
 }
 
