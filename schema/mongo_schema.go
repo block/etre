@@ -389,8 +389,12 @@ func BSONSchemaValidator(schema Schema, globalCase Case) (bson.M, error) {
 	jsonSchema := bson.M{
 		"bsonType":             "object",
 		"properties":           properties,
-		"required":             requiredFields,
 		"additionalProperties": schema.AdditionalProperties,
+	}
+
+	// MongoDB doesn't allow empty required arrays
+	if len(requiredFields) > 0 {
+		jsonSchema["required"] = requiredFields
 	}
 
 	if len(dependents) > 0 {
