@@ -130,6 +130,11 @@ func NewAPI(appCtx app.Context) *API {
 	mux.HandleFunc("GET "+etre.API_ROOT+"/schemas", api.getSchemasHandler)
 
 	// /////////////////////////////////////////////////////////////////////
+	// Entity Types
+	// /////////////////////////////////////////////////////////////////////
+	mux.HandleFunc("GET "+etre.API_ROOT+"/entity-types", api.getEntityTypesHandler)
+
+	// /////////////////////////////////////////////////////////////////////
 	// Metrics and status
 	// /////////////////////////////////////////////////////////////////////
 	mux.HandleFunc("GET "+etre.API_ROOT+"/metrics", api.metricsHandler)
@@ -1213,6 +1218,19 @@ func (api *API) getSchemasHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Return the schema(s)
 	json.NewEncoder(w).Encode(cfg)
+}
+
+// getEntityTypesHandler godoc
+// @Summary Get supported entity types
+// @Description Return a list of all supported entity types
+// @ID getEntityTypesHandler
+// @Produce json
+// @Success 200 {array} string "List of entity types"
+// @Router /entity-types [get]
+func (api *API) getEntityTypesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	entityTypes := api.validate.EntityTypes()
+	json.NewEncoder(w).Encode(entityTypes)
 }
 
 // Return error on read. Writes always return an etre.WriteResult by calling WriteResult.

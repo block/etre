@@ -29,6 +29,7 @@ type Validator interface {
 	Entities([]etre.Entity, byte) error
 	WriteOp(WriteOp) error
 	DeleteLabel(string) error
+	EntityTypes() []string
 }
 
 type validator struct {
@@ -151,4 +152,8 @@ func (v validator) DeleteLabel(label string) error {
 		}
 	}
 	return nil
+}
+
+func (v validator) EntityTypes() []string {
+	return v.entityTypes
 }
