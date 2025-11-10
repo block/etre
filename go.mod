@@ -10,6 +10,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8
 	github.com/gorilla/websocket v1.5.3
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
 	github.com/swaggo/http-swagger v1.3.4
 	github.com/swaggo/swag v1.16.4

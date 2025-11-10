@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v2"
+
+	"github.com/square/etre/schema"
 )
 
 const (
@@ -120,6 +122,7 @@ type Config struct {
 	CDC        CDCConfig        `yaml:"cdc"`
 	Security   SecurityConfig   `yaml:"security"`
 	Metrics    MetricsConfig    `yaml:"metrics"`
+	Schemas    schema.Config    `yaml:"schemas"`
 }
 
 func Redact(c Config) Config {
