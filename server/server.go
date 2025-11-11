@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/square/etre/config"
 	"github.com/square/etre/entity"
 	"github.com/square/etre/metrics"
+	"github.com/square/etre/schema"
 )
 
 type Server struct {
@@ -101,6 +104,14 @@ func (s *Server) Boot(configFile string) error {
 	}
 	s.appCtx.EntityStore = entity.NewStore(coll, s.appCtx.CDCStore, cfg.Entity)
 	s.appCtx.EntityValidator = entity.NewValidator(cfg.Entity.Types)
+
+	// //////////////////////////////////////////////////////////////////////
+	// Entity Schemas
+	// //////////////////////////////////////////////////////////////////////
+	err = s.runSchemaDDL()
+	if err != nil {
+		return fmt.Errorf("cannot run schema DDL: %w", err)
+	}
 
 	// //////////////////////////////////////////////////////////////////////
 	// Auth
@@ -238,6 +249,26 @@ func (s *Server) connectToDatasource(ds config.DatasourceConfig, client *mongo.C
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+func (s *Server) runSchemaDDL() error {
+	// We need to retry because the collMod calls that is required to update the schema may error
+	// if there is simultaneous writes to the collection.  This is a known behavior with MongoDB.
+	// However it's safe to retry because 1) the schema is idempotent and 2) the update is very fast
+	// since it's just updating metadata 3) index updates are also idempotent and fast since DocumentDB
+	// defaults all index builds to background as of v5.0.
+	db := s.mainDbClient.Database(s.appCtx.Config.Datasource.Database)
+	var err error
+	try := 0
+	for ; try < 5; try++ {
+		if err = schema.CreateOrUpdateMongoSchema(context.Background(), db, s.appCtx.Config.Schemas); err == nil {
+			return nil
+		}
+		// Sleep 2-4 seconds before retrying. Updates are very fast, so we don't need long waits.
+		jitter := time.Duration(rand.Intn(2000)) * time.Millisecond
+		time.Sleep(2*time.Second + jitter)
+	}
+	return errors.Wrapf(err, "failed to run DDL after %d tries", try)
 }
 
 func MapConfigACLRoles(aclRoles []config.ACL) ([]auth.ACL, error) {

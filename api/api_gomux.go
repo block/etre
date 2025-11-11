@@ -28,6 +28,7 @@ import (
 	"github.com/square/etre/entity"
 	"github.com/square/etre/metrics"
 	"github.com/square/etre/query"
+	"github.com/square/etre/schema"
 )
 
 func init() {
@@ -65,6 +66,7 @@ type API struct {
 	queryProfSampleRate      int
 	queryProfReportThreshold time.Duration
 	srv                      *http.Server
+	schemas                  schema.Config
 }
 
 // NewAPI godoc
@@ -94,6 +96,7 @@ func NewAPI(appCtx app.Context) *API {
 		queryLatencySLA:          queryLatencySLA,
 		queryProfSampleRate:      int(appCtx.Config.Metrics.QueryProfileSampleRate * 100),
 		queryProfReportThreshold: queryProfReportThreshold,
+		schemas:                  appCtx.Config.Schemas,
 	}
 
 	mux := http.NewServeMux()
@@ -119,6 +122,17 @@ func NewAPI(appCtx app.Context) *API {
 	mux.Handle("DELETE "+etre.API_ROOT+"/entity/{type}/{id}", api.requestWrapper(api.id(http.HandlerFunc(api.deleteEntityHandler))))
 	mux.Handle("GET "+etre.API_ROOT+"/entity/{type}/{id}/labels", api.requestWrapper(api.id(http.HandlerFunc(api.getLabelsHandler))))
 	mux.Handle("DELETE "+etre.API_ROOT+"/entity/{type}/{id}/labels/{label}", api.requestWrapper(api.id(http.HandlerFunc(api.deleteLabelHandler))))
+
+	// /////////////////////////////////////////////////////////////////////
+	// Schemas
+	// /////////////////////////////////////////////////////////////////////
+	mux.HandleFunc("GET "+etre.API_ROOT+"/schemas/{type}", api.getSchemasHandler)
+	mux.HandleFunc("GET "+etre.API_ROOT+"/schemas", api.getSchemasHandler)
+
+	// /////////////////////////////////////////////////////////////////////
+	// Entity Types
+	// /////////////////////////////////////////////////////////////////////
+	mux.HandleFunc("GET "+etre.API_ROOT+"/entity-types", api.getEntityTypesHandler)
 
 	// /////////////////////////////////////////////////////////////////////
 	// Metrics and status
@@ -1171,6 +1185,52 @@ func (api *API) changesHandler(w http.ResponseWriter, r *http.Request) {
 			log.Printf("CDC: %s: lost connection: %s", clientId, err)
 		}
 	}
+}
+
+// getSchemasHandler godoc
+// @Summary Get entity schemas
+// @Description Return the schema for one entity of the given :type
+// @ID getEntityHandler
+// @Produce json
+// @Param type path string true "Entity type"
+// @Success 200 {object} schema.Config "OK"
+// @Failure 400,404 {object} etre.Error
+// @Router /schema/:type [get]
+func (api *API) getSchemasHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	// Get the schemas config for all schemas
+	cfg := api.schemas
+
+	// If entity type is provided, make sure it is valid
+	entityType := r.PathValue("type")
+	if entityType != "" {
+		if err := api.validate.EntityType(entityType); err != nil {
+			log.Printf("Invalid entity type: '%s': request=%+v", entityType, r)
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(err) // validation error will encode nicely
+			return
+		}
+		// Make a config with only the requested entity type schema.
+		cfg.Entities = map[string]schema.EntitySchema{
+			entityType: api.schemas.Entities[entityType],
+		}
+	}
+
+	// Return the schema(s)
+	json.NewEncoder(w).Encode(cfg)
+}
+
+// getEntityTypesHandler godoc
+// @Summary Get supported entity types
+// @Description Return a list of all supported entity types
+// @ID getEntityTypesHandler
+// @Produce json
+// @Success 200 {array} string "List of entity types"
+// @Router /entity-types [get]
+func (api *API) getEntityTypesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	entityTypes := api.validate.EntityTypes()
+	json.NewEncoder(w).Encode(entityTypes)
 }
 
 // Return error on read. Writes always return an etre.WriteResult by calling WriteResult.
