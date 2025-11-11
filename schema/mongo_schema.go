@@ -41,8 +41,8 @@ var (
 
 // CreateOrUpdateMongoSchema creates or updates the MongoDB schema for the given entity. If the schema is nil or has
 // empty fields, it removes the JSON schema validation. If the schema is not nil, it ensures that the indexes in the
-// schem exists, and any indexes that are not in the schema are removed. Entity Collection creation is handled by the
-// index creation process. We assume that any reasonaby designed schema should not solely rely on full collection scans.
+// schema exists, and any indexes that are not in the schema are removed. Entity Collection creation is handled by the
+// index creation process. We assume that any reasonably designed schema should not solely rely on full collection scans.
 func CreateOrUpdateMongoSchema(ctx context.Context, db *mongo.Database, config Config) error {
 	log.Printf("INFO: walking through entity validations")
 	for entity, validations := range config.Entities {
@@ -255,7 +255,7 @@ func existingIndexes(ctx context.Context, coll *mongo.Collection) ([]string, err
 			return nil, errors.Wrap(err, "Failed to decode index description")
 		}
 
-		log.Printf("INFO: Current exising index for %s: %+v", coll.Name(), index)
+		log.Printf("INFO: Current existing index for %s: %+v", coll.Name(), index)
 		name, ok := index["name"].(string)
 		if !ok {
 			return nil, fmt.Errorf("Failed to get index name for index from entity %s: %+v", coll.Name(), index)
