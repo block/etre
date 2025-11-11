@@ -34,7 +34,7 @@ For full context of how we arrived at this approach, see the [Schema Validation 
 **Schema**: Specify global case in `validations` -> `config` -> `schema`.
 ### Example
 ```yaml
-validations:
+schemas:
   entities:
     elasticache:
       schema:
