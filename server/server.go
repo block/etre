@@ -253,9 +253,9 @@ func (s *Server) connectToDatasource(ds config.DatasourceConfig, client *mongo.C
 
 func (s *Server) runSchemaDDL() error {
 	// We need to retry because the collMod calls that is required to update the schema may error
-	// if there is simulaneous writes to the collection.  This is a known behavior with MongoDB.
+	// if there is simultaneous writes to the collection.  This is a known behavior with MongoDB.
 	// However it's safe to retry because 1) the schema is idempotent and 2) the update is very fast
-	// since it's just updating metadata 3) index updates also idempotent and fast since DocumentDB
+	// since it's just updating metadata 3) index updates are also idempotent and fast since DocumentDB
 	// defaults all index builds to background as of v5.0.
 	db := s.mainDbClient.Database(s.appCtx.Config.Datasource.Database)
 	var err error

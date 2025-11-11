@@ -21,7 +21,7 @@ type EntitySchema struct {
 }
 
 // Schema represents the basic schema for an Entity.
-// This includes JSON schema validation for entitie fields as well as database index definitions.
+// This includes JSON schema validation for entity fields as well as database index definitions.
 type Schema struct {
 	Fields               []Field `yaml:"fields"`
 	AdditionalProperties bool    `yaml:"additional_properties"`

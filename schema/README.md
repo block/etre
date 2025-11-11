@@ -135,7 +135,7 @@ validations:
     …
 ```
 ## Performance Implications
-Schema validation impacts write operations in terms of resource consumption and latency, but is optimized within MongoDB. Benchmark new validations to ensure they meet performance criteria..
+Schema validation impacts write operations in terms of resource consumption and latency, but is optimized within MongoDB. Benchmark new validations to ensure they meet performance criteria.
 # Error Handling
 Currently, InsertEntities and UpdateEntities in OSS Etre handle each entity separately, stopping on the first error encountered. Until batch processing is improved, handle discrete error scenarios within your application logic
 # Adding and Deleting Indexes
