@@ -17,10 +17,6 @@ import (
 	"github.com/square/etre/query"
 )
 
-const (
-	StreamChannelBufferSize = 100
-)
-
 // Store interface has methods needed to do CRUD operations on entities.
 type Store interface {
 	ReadEntity(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error)
@@ -55,17 +51,17 @@ func NewStore(entities map[string]*mongo.Collection, cdcStore cdc.Store, cfg con
 func (s store) ReadEntity(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 	c, ok := s.coll[entityType]
 	if !ok {
-		panic("invalid entity type passed to ReadEntities: " + entityType)
+		panic("invalid entity type passed to ReadEntity: " + entityType)
 	}
 
-	// Find and return all matching entities
+	// Find and return the matching entity
 	p := bson.M{}
 	if len(f.ReturnLabels) > 0 {
 		for _, label := range f.ReturnLabels {
 			p[label] = 1
 		}
 		// Only include _id if explicitly set in f.ReturnLabels. If not,
-		// ok is false and we must explicitly exlude it because MongoDB
+		// ok is false and we must explicitly exclude it because MongoDB
 		// returns it by default.
 		if _, ok := p["_id"]; !ok {
 			p["_id"] = 0
@@ -73,7 +69,11 @@ func (s store) ReadEntity(ctx context.Context, entityType string, entityId strin
 	}
 
 	// Query, we should only get one row
-	q, _ := query.Translate("_id=" + entityId)
+	q, err := query.Translate("_id=" + entityId)
+	if err != nil {
+		return nil, s.dbError(ctx, err, "invalid-query")
+	}
+
 	result := c.FindOne(ctx, Filter(q), options.FindOne().SetProjection(p))
 	if err := result.Err(); err != nil {
 		nfe := mongo.ErrNoDocuments
@@ -100,7 +100,7 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 		panic("invalid entity type passed to StreamEntities: " + entityType)
 	}
 
-	ch := make(chan EntityResult, StreamChannelBufferSize)
+	ch := make(chan EntityResult, 2*int32(s.config.BatchSize))
 	go func() {
 		defer close(ch)
 
@@ -115,19 +115,19 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 					// No documents found, return to close the channel
 					return
 				}
-				ch <- EntityResult{Err: s.dbError(ctx, err, "db-read-distinct")}
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query-distinct"))
 				return
 			}
 
 			var values []string
 			err := dr.Decode(&values)
 			if err != nil {
-				ch <- EntityResult{Err: s.dbError(ctx, err, "db-read-distinct")}
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query-distinct"))
 				return
 			}
 			// Distinct doesn't return a cursor, so we just have to loop and send the results
 			for _, v := range values {
-				ch <- EntityResult{Entity: etre.Entity{f.ReturnLabels[0]: v}}
+				s.writeEntityToChannel(ctx, ch, etre.Entity{f.ReturnLabels[0]: v})
 			}
 			return
 		}
@@ -139,7 +139,7 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 				p[label] = 1
 			}
 			// Only include _id if explicitly set in f.ReturnLabels. If not,
-			// ok is false and we must explicitly exlude it because MongoDB
+			// ok is false and we must explicitly exclude it because MongoDB
 			// returns it by default.
 			if _, ok := p["_id"]; !ok {
 				p["_id"] = 0
@@ -150,7 +150,7 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 		opts := options.Find().SetProjection(p).SetBatchSize(int32(s.config.BatchSize))
 		cursor, err := c.Find(ctx, Filter(q), opts)
 		if err != nil {
-			ch <- EntityResult{Err: s.dbError(ctx, err, "db-query")}
+			s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query"))
 			return
 		}
 		defer cursor.Close(ctx)
@@ -159,18 +159,44 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 		for cursor.Next(ctx) {
 			var entity etre.Entity
 			if err := cursor.Decode(&entity); err != nil {
-				ch <- EntityResult{Err: s.dbError(ctx, err, "db-read-cursor")}
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-read-cursor"))
 				return
 			}
-			ch <- EntityResult{Entity: entity}
+			s.writeEntityToChannel(ctx, ch, entity)
 		}
 		// Check for errors from iterating over cursor
 		if err := cursor.Err(); err != nil {
-			ch <- EntityResult{Err: s.dbError(ctx, err, "db-read-cursor")}
+			s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-read-cursor"))
 			return
 		}
 	}()
 	return ch
+}
+
+func (s store) writeEntityToChannel(ctx context.Context, ch chan EntityResult, entity etre.Entity) {
+	select {
+	case <-ctx.Done():
+		// The context was canceled or timed out. Bail out.
+		// We can't write the error to the channel because the receiver may have stopped listening.
+		// We depend on the receiver to see the ctx timeout as well.
+		return
+	case ch <- EntityResult{Entity: entity}:
+		// Successfully wrote to the channel
+	}
+	return
+}
+
+func (s store) writeErrToChannel(ctx context.Context, ch chan EntityResult, err error) {
+	select {
+	case <-ctx.Done():
+		// The context was canceled or timed out. Bail out.
+		// We can't write the error to the channel because the receiver may have stopped listening.
+		// We depend on the receiver to see the ctx timeout as well.
+		return
+	case ch <- EntityResult{Err: err}:
+		// Successfully wrote to the channel
+	}
+	return
 }
 
 // CreateEntities inserts many entities into DB. This method allows for partial

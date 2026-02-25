@@ -646,6 +646,13 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// One final check of the context timeout. If the store closed the channel because the context was canceled,
+	// we want to return an error instead of partial results.
+	if err := ctx.Err(); err != nil {
+		api.readError(rc, w, err)
+		return
+	}
+
 	// Clean up the JSON array
 	if count == 0 {
 		// Never saw any data. Write an empty array.
