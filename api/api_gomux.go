@@ -1150,7 +1150,7 @@ func (api *API) changesHandler(w http.ResponseWriter, r *http.Request) {
 	// Upgrade to a WebSocket connection.
 	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		api.readError(rc, w, ErrInternal.New(err.Error()))
+		api.readError(rc, w, ErrInternal.New("%s", err.Error()))
 		return
 	}
 	defer wsConn.Close()
