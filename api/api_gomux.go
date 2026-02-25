@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -576,26 +577,71 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Query data store (instrumented)
 	rc.inst.Start("db")
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, f)
+	entities := api.es.StreamEntities(ctx, rc.entityType, q, f)
 	rc.inst.Stop("db")
-	if err != nil {
-		api.readError(rc, w, err)
-		return
-	}
-	rc.gm.Val(metrics.ReadMatch, int64(len(entities)))
 
-	// Success: return matching entities (possibly empty list)
 	rc.inst.Start("encode-response")
-	if len(entities) > 0 && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		// use gzip compression if we have data to send back and the client accepts gzip
-		w.Header().Set("Content-Encoding", "gzip")
-		gzw := gzip.NewWriter(w)
-		defer gzw.Close()
-		json.NewEncoder(gzw).Encode(entities)
-	} else {
-		// no compression
-		json.NewEncoder(w).Encode(entities)
+	first := true
+
+	// Stream the results
+	count := 0
+	var finalWriter io.Writer
+	finalWriter = w
+	var encoder *json.Encoder
+	for e := range entities {
+		if e.Err != nil {
+			// Handle errors returned by the database
+			api.readError(rc, w, e.Err)
+			return
+		}
+
+		if err := ctx.Err(); err != nil {
+			// Handle context timeouts
+			// api.readError will mangle the response, but we can't just return partial results so let it blow up
+			api.readError(rc, w, err)
+			return
+		}
+
+		count++
+
+		// Enable compression if client accepts gzip and this is the first entity (we want to avoid compressing an empty response)
+		if first && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gzw := gzip.NewWriter(w)
+			defer gzw.Close()
+			finalWriter = gzw
+		}
+
+		// Start the JSON array if this is the first record, or put a comma separator if not the first record
+		if first {
+			finalWriter.Write([]byte("["))
+			encoder = json.NewEncoder(finalWriter)
+			first = false
+		} else {
+			finalWriter.Write([]byte(","))
+		}
+
+		// Write the record and handle the error.
+		// encoder.Encode will add a newline, which is fine (nice for human readable output)
+		err = encoder.Encode(e.Entity)
+		if err != nil {
+			// api.readError will mangle the response, but if the encoder failed then the response is already mangled and there's not much else we can do.
+			api.readError(rc, w, err)
+			log.Println("ERROR: Read error while encoding response: ", err)
+			return
+		}
 	}
+
+	// Clean up the JSON array
+	if first {
+		// Never saw any data. Write an empty array.
+		finalWriter.Write([]byte("[]"))
+	} else {
+		// We wrote some data, now we need to close the array
+		finalWriter.Write([]byte("]")) // end of JSON array
+	}
+
+	rc.gm.Val(metrics.ReadMatch, int64(count))
 	rc.inst.Stop("encode-response")
 }
 
@@ -804,18 +850,17 @@ func (api *API) getEntityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read the entity by ID
-	q, _ := query.Translate("_id=" + rc.entityId)
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, f)
+	entity, err := api.es.ReadEntity(ctx, rc.entityType, rc.entityId, f)
 	if err != nil {
 		api.readError(rc, w, err)
 		return
 	}
-	if len(entities) == 0 {
+	if entity == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	json.NewEncoder(w).Encode(entities[0])
+	json.NewEncoder(w).Encode(entity)
 }
 
 // getLabelsHandler godoc
@@ -837,18 +882,17 @@ func (api *API) getLabelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	rc.gm.Inc(metrics.ReadLabels, 1) // specific read type
 
-	q, _ := query.Translate("_id=" + rc.entityId)
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, etre.QueryFilter{})
+	entity, err := api.es.ReadEntity(ctx, rc.entityType, rc.entityId, etre.QueryFilter{})
 	if err != nil {
 		api.readError(rc, w, err)
 		return
 	}
-	if len(entities) == 0 {
+	if entity == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	json.NewEncoder(w).Encode(entities[0].Labels())
+	json.NewEncoder(w).Encode(entity.Labels())
 }
 
 // --------------------------------------------------------------------------

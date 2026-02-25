@@ -94,7 +94,7 @@ func docs(entities []etre.Entity) []interface{} {
 // Read
 // --------------------------------------------------------------------------
 
-func TestReadEntitiesWithAllOperators(t *testing.T) {
+func TestStreamEntitiesWithAllOperators(t *testing.T) {
 	// Test all operators: in, notin, =, ==, !=, (has) y, (does not have) !foo, <, >
 	// All values are set such that it only matches the first test node to make
 	// testing easier and ensure we don't match the other entities.
@@ -115,7 +115,7 @@ func TestReadEntitiesWithAllOperators(t *testing.T) {
 		q, err := query.Translate(qs)
 		require.NoError(t, err)
 
-		actual, err := store.ReadEntities(context.Background(), entityType, q, etre.QueryFilter{})
+		actual, err := readStream(store.StreamEntities(context.Background(), entityType, q, etre.QueryFilter{}))
 		require.NoError(t, err)
 		assert.Equal(t, expect, actual)
 	}
@@ -126,7 +126,7 @@ type readTest struct {
 	expect []etre.Entity
 }
 
-func TestReadEntitiesMatching(t *testing.T) {
+func TestStreamEntitiesMatching(t *testing.T) {
 	// Test various combinations of queries to ensure that we match and return
 	// the correct entities. This is the fundamental job of Etre, so it should
 	// be very thoroughly tested.
@@ -157,13 +157,40 @@ func TestReadEntitiesMatching(t *testing.T) {
 		q, err := query.Translate(rt.query)
 		require.NoError(t, err)
 
-		got, err := store.ReadEntities(context.Background(), entityType, q, etre.QueryFilter{})
+		got, err := readStream(store.StreamEntities(context.Background(), entityType, q, etre.QueryFilter{}))
 		require.NoError(t, err)
 		assert.Equal(t, rt.expect, got)
 	}
 }
 
-func TestReadEntitiesFilterDistinct(t *testing.T) {
+func TestReadEntityMatching(t *testing.T) {
+	// Test various combinations of queries to ensure that we match and return
+	// the correct entities. This is the fundamental job of Etre, so it should
+	// be very thoroughly tested.
+	store := setup(t, &mock.CDCStore{})
+	readTests := []struct {
+		id     string
+		expect etre.Entity
+	}{
+		{
+			// found
+			id:     testNodes[1]["_id"].(bson.ObjectID).Hex(),
+			expect: testNodes[1],
+		},
+		{
+			// not found
+			id:     "bogus",
+			expect: nil,
+		},
+	}
+	for _, rt := range readTests {
+		got, err := store.ReadEntity(context.Background(), entityType, rt.id, etre.QueryFilter{})
+		require.NoError(t, err)
+		assert.Equal(t, rt.expect, got)
+	}
+}
+
+func TestStreamEntitiesFilterDistinct(t *testing.T) {
 	// Test that etre.QueryFilter{Distinct: true} returns a list of unique values
 	// for one label. The 1st test node has y=a and the 2nd and 3rd both have y=b,
 	// so the unique values are [a,b].
@@ -175,7 +202,7 @@ func TestReadEntitiesFilterDistinct(t *testing.T) {
 		ReturnLabels: []string{"y"}, // only works with 1 return label
 		Distinct:     true,
 	}
-	got, err := store.ReadEntities(context.Background(), entityType, q, f)
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
 	require.NoError(t, err)
 
 	expect := []etre.Entity{
@@ -185,7 +212,7 @@ func TestReadEntitiesFilterDistinct(t *testing.T) {
 	assert.Equal(t, expect, got)
 }
 
-func TestReadEntitiesFilterDistinctNoResult(t *testing.T) {
+func TestStreamEntitiesFilterDistinctNoResult(t *testing.T) {
 	// Test that etre.QueryFilter{Distinct: true} returns an empty list
 	// if no rows match the query.
 	store := setup(t, &mock.CDCStore{})
@@ -196,12 +223,12 @@ func TestReadEntitiesFilterDistinctNoResult(t *testing.T) {
 		ReturnLabels: []string{"BOGUS"}, // only works with 1 return label
 		Distinct:     true,
 	}
-	got, err := store.ReadEntities(context.Background(), entityType, q, f)
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
 	require.NoError(t, err)
 	assert.Empty(t, got)
 }
 
-func TestReadEntitiesFilterReturnLabels(t *testing.T) {
+func TestStreamEntitiesFilterReturnLabels(t *testing.T) {
 	// Test that etre.QueryFilter{ReturnLabels: []string{x}} returns only that
 	// label and not the others (y, z, bar, foo). We'll select/match by label y
 	// but return only label x.
@@ -217,23 +244,49 @@ func TestReadEntitiesFilterReturnLabels(t *testing.T) {
 		{"x": int64(4)},
 		{"x": int64(6)},
 	}
-	got, err := store.ReadEntities(context.Background(), entityType, q, f)
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
 	require.NoError(t, err)
 	assert.Equal(t, expect, got)
 }
 
-func TestReadEntitiesFilterReturnMetalabels(t *testing.T) {
+func TestReadEntityFilterReturnLabels(t *testing.T) {
+	// Test that etre.QueryFilter{ReturnLabels: []string{x}} returns only that
+	// label and not the others (y, z, bar, foo). We'll select/match by label y
+	// but return only label x.
+	store := setup(t, &mock.CDCStore{})
+
+	f := etre.QueryFilter{
+		ReturnLabels: []string{"x"}, // testing this
+	}
+	expect := etre.Entity{"x": int64(2)}
+
+	got, err := store.ReadEntity(context.Background(), entityType, testNodes[0]["_id"].(bson.ObjectID).Hex(), f)
+	require.NoError(t, err)
+	assert.Equal(t, expect, got)
+}
+
+func TestStreamEntitiesFilterReturnMetalabels(t *testing.T) {
 	store := setup(t, &mock.CDCStore{})
 	q, err := query.Translate("y=a")
 	require.NoError(t, err)
 
-	actual, err := store.ReadEntities(context.Background(), entityType, q, etre.QueryFilter{ReturnLabels: []string{"_id", "_type", "_rev", "y", "_created", "_updated"}})
+	actual, err := readStream(store.StreamEntities(context.Background(), entityType, q, etre.QueryFilter{ReturnLabels: []string{"_id", "_type", "_rev", "y", "_created", "_updated"}}))
 	require.NoError(t, err)
 
 	expect := []etre.Entity{
 		{"_id": testNodes[0]["_id"], "_type": entityType, "_rev": int64(0), "y": "a",
 			"_created": testNodes[0]["_created"], "_updated": testNodes[0]["_updated"]},
 	}
+	assert.Equal(t, expect, actual)
+}
+
+func TestReadEntityFilterReturnMetalabels(t *testing.T) {
+	store := setup(t, &mock.CDCStore{})
+
+	actual, err := store.ReadEntity(context.Background(), entityType, testNodes[0]["_id"].(bson.ObjectID).Hex(), etre.QueryFilter{ReturnLabels: []string{"_id", "_type", "_rev", "y", "_created", "_updated"}})
+	require.NoError(t, err)
+
+	expect := etre.Entity{"_id": testNodes[0]["_id"], "_type": entityType, "_rev": int64(0), "y": "a", "_created": testNodes[0]["_created"], "_updated": testNodes[0]["_updated"]}
 	assert.Equal(t, expect, actual)
 }
 
@@ -745,7 +798,7 @@ func TestDeleteLabel(t *testing.T) {
 
 	// The foo label should no longer be set on the entity
 	q, _ := query.Translate("y=a")
-	gotNew, err := store.ReadEntities(context.Background(), entityType, q, etre.QueryFilter{})
+	gotNew, err := readStream(store.StreamEntities(context.Background(), entityType, q, etre.QueryFilter{}))
 	require.NoError(t, err)
 
 	e := etre.Entity{}
@@ -779,4 +832,15 @@ func TestDeleteLabel(t *testing.T) {
 		},
 	}
 	assert.Equal(t, expectEvent, gotEvents)
+}
+
+func readStream(ch <-chan entity.EntityResult) ([]etre.Entity, error) {
+	entities := []etre.Entity{}
+	for r := range ch {
+		if r.Err != nil {
+			return nil, r.Err
+		}
+		entities = append(entities, r.Entity)
+	}
+	return entities, nil
 }

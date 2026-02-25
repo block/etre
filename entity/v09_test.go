@@ -293,7 +293,7 @@ func TestV09DeleteLabel(t *testing.T) {
 
 	// The foo label should no longer be set on the entity
 	q, _ := query.Translate("x=a")
-	gotNew, err := store.ReadEntities(context.Background(), entityType, q, etre.QueryFilter{})
+	gotNew, err := readStream(store.StreamEntities(context.Background(), entityType, q, etre.QueryFilter{}))
 	require.NoError(t, err)
 
 	e := etre.Entity{}
