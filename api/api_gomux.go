@@ -581,42 +581,47 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 	rc.inst.Stop("db")
 
 	rc.inst.Start("encode-response")
-	first := true
 
-	// Stream the results
-	count := 0
+	// FinalWriter is where we will write the data. If we're using gzip compression, this will be the gzip writer. If not, it will just be the original response writer.
 	var finalWriter io.Writer
 	finalWriter = w
+
+	// gzip writer, only initialized if client accepts gzip encoding.
+	var gzw *gzip.Writer
+
+	// encoder is the JSON encoder writing to finalWriter. We initialize it after we know whether we're using gzip or not.
 	var encoder *json.Encoder
+
+	// Number of non-error records sent to the client
+	count := 0
 	for e := range entities {
+
+		// Handle errors returned by the database
 		if e.Err != nil {
-			// Handle errors returned by the database
 			api.readError(rc, w, e.Err)
 			return
 		}
-
+		// Handle context timeouts
 		if err := ctx.Err(); err != nil {
-			// Handle context timeouts
-			// api.readError will mangle the response, but we can't just return partial results so let it blow up
 			api.readError(rc, w, err)
 			return
 		}
 
-		count++
-
-		// Enable compression if client accepts gzip and this is the first entity (we want to avoid compressing an empty response)
-		if first && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		// Initialize gzip writer and JSON encoder on the first record, after we know there is data to return to the client.
+		// We also check the client's Accept-Encoding header to see if gzip is supported.
+		if count == 0 && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
-			gzw := gzip.NewWriter(w)
+			gzw = gzip.NewWriter(w)
 			defer gzw.Close()
 			finalWriter = gzw
 		}
 
 		// Start the JSON array if this is the first record, or put a comma separator if not the first record
-		if first {
+		// We don't do this before the for loop because we don't want to write the opening bracket if there is a database
+		// error in the first record returned.
+		if count == 0 {
 			finalWriter.Write([]byte("["))
 			encoder = json.NewEncoder(finalWriter)
-			first = false
 		} else {
 			finalWriter.Write([]byte(","))
 		}
@@ -630,15 +635,28 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 			log.Println("ERROR: Read error while encoding response: ", err)
 			return
 		}
+
+		// Count the record
+		count++
+
+		// If we're compressing, flush every 100 records to ensure data is sent to the client in a timely manner and not buffered in memory.
+		// Otherwise, the gzip flusher may buffer all the data instead of chunking.
+		if gzw != nil && count%100 == 0 {
+			gzw.Flush()
+		}
 	}
 
 	// Clean up the JSON array
-	if first {
+	if count == 0 {
 		// Never saw any data. Write an empty array.
 		finalWriter.Write([]byte("[]"))
 	} else {
 		// We wrote some data, now we need to close the array
 		finalWriter.Write([]byte("]")) // end of JSON array
+	}
+
+	if gzw != nil {
+		gzw.Flush() // flush any remaining compressed data to the client
 	}
 
 	rc.gm.Val(metrics.ReadMatch, int64(count))
