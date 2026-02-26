@@ -17,7 +17,6 @@ import (
 	"github.com/square/etre/auth"
 	"github.com/square/etre/entity"
 	"github.com/square/etre/metrics"
-	"github.com/square/etre/query"
 	"github.com/square/etre/test"
 	"github.com/square/etre/test/mock"
 )
@@ -27,15 +26,14 @@ import (
 // //////////////////////////////////////////////////////////////////////////
 
 func TestGetEntityBasic(t *testing.T) {
-	// Test the most basic GET /entity/:type/:id gets the entity. This is
-	// really a wrapper to call ReadEntitiesFunc() with _id=:id.
-	var gotQuery query.Query
+	// Test the most basic GET /entity/:type/:id gets the entity.
+	var gotEntityId string
 	var gotFilter etre.QueryFilter
 	store := mock.EntityStore{
-		ReadEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
-			gotQuery = q
+		ReadEntityFunc: func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
+			gotEntityId = entityId
 			gotFilter = f
-			return testEntitiesWithObjectIDs[0:1], nil
+			return testEntitiesWithObjectIDs[0], nil
 		},
 	}
 	server := setup(t, defaultConfig, store)
@@ -49,8 +47,7 @@ func TestGetEntityBasic(t *testing.T) {
 	assert.Equal(t, http.StatusOK, statusCode, "response status = %d, expected %d", statusCode, http.StatusOK)
 
 	// GET /entity/:type/:id = "_id=:id"
-	expectQuery, _ := query.Translate("_id=" + testEntityIds[0])
-	assert.Equal(t, expectQuery, gotQuery)
+	assert.Equal(t, testEntityIds[0], gotEntityId)
 
 	// No filter options provided in URL
 	expectFilter := etre.QueryFilter{}
@@ -84,9 +81,9 @@ func TestGetEntityReturnLabels(t *testing.T) {
 	// that the URL param "labels=" is processed and passed along to the entity.Store.
 	var gotFilter etre.QueryFilter
 	store := mock.EntityStore{
-		ReadEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
+		ReadEntityFunc: func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 			gotFilter = f
-			return testEntitiesWithObjectIDs[0:1], nil
+			return testEntitiesWithObjectIDs[0], nil
 		},
 	}
 	server := setup(t, defaultConfig, store)
@@ -130,8 +127,8 @@ func TestGetEntityNotFound(t *testing.T) {
 	// We simulate this by making ReadEntities() below return an empty list which
 	// the real entity.Store() does when no entity exists with the given _id.
 	store := mock.EntityStore{
-		ReadEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
-			return []etre.Entity{}, nil
+		ReadEntityFunc: func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
+			return nil, nil
 		},
 	}
 	server := setup(t, defaultConfig, store)
@@ -164,7 +161,7 @@ func TestGetEntityErrors(t *testing.T) {
 	read := false
 	var dbError error
 	store := mock.EntityStore{
-		ReadEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
+		ReadEntityFunc: func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 			read = true
 			return nil, dbError
 		},
@@ -255,13 +252,13 @@ func TestGetEntityErrors(t *testing.T) {
 
 func TestGetEntityLabels(t *testing.T) {
 	// Test that GET /entity/:type/:id/labels works
-	var gotQuery query.Query
+	var gotEntityId string
 	var gotFilter etre.QueryFilter
 	store := mock.EntityStore{
-		ReadEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
-			gotQuery = q
+		ReadEntityFunc: func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
+			gotEntityId = entityId
 			gotFilter = f
-			return testEntitiesWithObjectIDs[0:1], nil
+			return testEntitiesWithObjectIDs[0], nil
 		},
 	}
 	server := setup(t, defaultConfig, store)
@@ -275,8 +272,7 @@ func TestGetEntityLabels(t *testing.T) {
 	assert.Equal(t, http.StatusOK, statusCode)
 
 	// GET /entity/:type/:id = "_id=:id"
-	expectQuery, _ := query.Translate("_id=" + testEntityIds[0])
-	assert.Equal(t, expectQuery, gotQuery)
+	assert.Equal(t, testEntityIds[0], gotEntityId)
 
 	// No filter options provided in URL
 	expectFilter := etre.QueryFilter{}

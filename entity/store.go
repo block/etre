@@ -19,7 +19,7 @@ import (
 
 // Store interface has methods needed to do CRUD operations on entities.
 type Store interface {
-	ReadEntities(context.Context, string, query.Query, etre.QueryFilter) ([]etre.Entity, error)
+	ReadEntity(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error)
 
 	CreateEntities(context.Context, WriteOp, []etre.Entity) ([]string, error)
 
@@ -28,6 +28,8 @@ type Store interface {
 	DeleteEntities(context.Context, WriteOp, query.Query) ([]etre.Entity, error)
 
 	DeleteLabel(context.Context, WriteOp, string) (etre.Entity, error)
+
+	StreamEntities(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan EntityResult
 }
 
 type store struct {
@@ -45,65 +47,156 @@ func NewStore(entities map[string]*mongo.Collection, cdcStore cdc.Store, cfg con
 	}
 }
 
-// ReadEntities queries the db and returns a slice of Entity objects if
-// something is found, a nil slice if nothing is found, and an error if one
-// occurs.
-func (s store) ReadEntities(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
+// ReadEntity queries the db for a single entity. Returns nil if not found.
+func (s store) ReadEntity(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 	c, ok := s.coll[entityType]
 	if !ok {
-		panic("invalid entity type passed to ReadEntities: " + entityType)
+		panic("invalid entity type passed to ReadEntity: " + entityType)
 	}
 
-	// Distinct optimizaiton: unique values for the one return label. For example,
-	// "es -u node.metacluster zone=pd" returns a list of unique metacluster names.
-	// This is 10x faster than "es node.metacluster zone=pd | sort -u".
-	if len(f.ReturnLabels) == 1 && f.Distinct {
-		dr := c.Distinct(ctx, f.ReturnLabels[0], Filter(q))
-		if err := dr.Err(); err != nil {
-			nfe := mongo.ErrNoDocuments
-			if errors.Is(err, nfe) {
-				// No documents found, return empty slice
-				return []etre.Entity{}, nil
-			}
-			return nil, s.dbError(ctx, err, "db-read-distinct")
-		}
-		var values []string
-		err := dr.Decode(&values)
-		if err != nil {
-			return nil, s.dbError(ctx, err, "db-read-distinct")
-		}
-		entities := make([]etre.Entity, len(values))
-		for i, v := range values {
-			entities[i] = etre.Entity{f.ReturnLabels[0]: v}
-		}
-		return entities, nil
-	}
-
-	// Find and return all matching entities
+	// Find and return the matching entity
 	p := bson.M{}
 	if len(f.ReturnLabels) > 0 {
 		for _, label := range f.ReturnLabels {
 			p[label] = 1
 		}
 		// Only include _id if explicitly set in f.ReturnLabels. If not,
-		// ok is false and we must explicitly exlude it because MongoDB
+		// ok is false and we must explicitly exclude it because MongoDB
 		// returns it by default.
 		if _, ok := p["_id"]; !ok {
 			p["_id"] = 0
 		}
 	}
 
-	// Set batch size and projection
-	opts := options.Find().SetProjection(p).SetBatchSize(int32(s.config.BatchSize))
-	cursor, err := c.Find(ctx, Filter(q), opts)
+	// Query, we should only get one row
+	q, err := query.Translate("_id=" + entityId)
 	if err != nil {
-		return nil, s.dbError(ctx, err, "db-query")
+		return nil, s.dbError(ctx, err, "invalid-query")
 	}
-	entities := []etre.Entity{}
-	if err := cursor.All(ctx, &entities); err != nil {
+
+	result := c.FindOne(ctx, Filter(q), options.FindOne().SetProjection(p))
+	if err := result.Err(); err != nil {
+		nfe := mongo.ErrNoDocuments
+		if errors.Is(err, nfe) {
+			return nil, nil
+		}
+		return nil, s.dbError(ctx, result.Err(), "db-query")
+	}
+	entity := etre.Entity{}
+	if err := result.Decode(&entity); err != nil {
 		return nil, s.dbError(ctx, err, "db-read-cursor")
 	}
-	return entities, nil
+	return entity, nil
+}
+
+type EntityResult struct {
+	Entity etre.Entity
+	Err    error
+}
+
+func (s store) StreamEntities(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan EntityResult {
+	c, ok := s.coll[entityType]
+	if !ok {
+		panic("invalid entity type passed to StreamEntities: " + entityType)
+	}
+
+	ch := make(chan EntityResult, 2*int32(s.config.BatchSize))
+	go func() {
+		defer close(ch)
+
+		// Distinct optimization: unique values for the one return label. For example,
+		// "es -u node.metacluster zone=pd" returns a list of unique metacluster names.
+		// This is 10x faster than "es node.metacluster zone=pd | sort -u".
+		if len(f.ReturnLabels) == 1 && f.Distinct {
+			dr := c.Distinct(ctx, f.ReturnLabels[0], Filter(q))
+			if err := dr.Err(); err != nil {
+				nfe := mongo.ErrNoDocuments
+				if errors.Is(err, nfe) {
+					// No documents found, return to close the channel
+					return
+				}
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query-distinct"))
+				return
+			}
+
+			var values []string
+			err := dr.Decode(&values)
+			if err != nil {
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query-distinct"))
+				return
+			}
+			// Distinct doesn't return a cursor, so we just have to loop and send the results
+			for _, v := range values {
+				s.writeEntityToChannel(ctx, ch, etre.Entity{f.ReturnLabels[0]: v})
+			}
+			return
+		}
+
+		// Find and return all matching entities
+		p := bson.M{}
+		if len(f.ReturnLabels) > 0 {
+			for _, label := range f.ReturnLabels {
+				p[label] = 1
+			}
+			// Only include _id if explicitly set in f.ReturnLabels. If not,
+			// ok is false and we must explicitly exclude it because MongoDB
+			// returns it by default.
+			if _, ok := p["_id"]; !ok {
+				p["_id"] = 0
+			}
+		}
+
+		// Run the query
+		opts := options.Find().SetProjection(p).SetBatchSize(int32(s.config.BatchSize))
+		cursor, err := c.Find(ctx, Filter(q), opts)
+		if err != nil {
+			s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query"))
+			return
+		}
+		defer cursor.Close(ctx)
+
+		// Stream results
+		for cursor.Next(ctx) {
+			var entity etre.Entity
+			if err := cursor.Decode(&entity); err != nil {
+				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-read-cursor"))
+				return
+			}
+			s.writeEntityToChannel(ctx, ch, entity)
+		}
+		// Check for errors from iterating over cursor
+		if err := cursor.Err(); err != nil {
+			s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-read-cursor"))
+			return
+		}
+	}()
+	return ch
+}
+
+func (s store) writeEntityToChannel(ctx context.Context, ch chan EntityResult, entity etre.Entity) {
+	select {
+	case <-ctx.Done():
+		// The context was canceled or timed out. Bail out.
+		// We can't write the error to the channel because the receiver may have stopped listening.
+		// We depend on the receiver to see the ctx timeout as well.
+		return
+	case ch <- EntityResult{Entity: entity}:
+		// Successfully wrote to the channel
+	}
+	return
+}
+
+func (s store) writeErrToChannel(ctx context.Context, ch chan EntityResult, err error) {
+	select {
+	case <-ctx.Done():
+		// The context was canceled or timed out. Bail out.
+		// We can't write the error to the channel because the receiver may have stopped listening.
+		// We depend on the receiver to see the ctx timeout as well.
+		return
+	case ch <- EntityResult{Err: err}:
+		// Successfully wrote to the channel
+	}
+	return
 }
 
 // CreateEntities inserts many entities into DB. This method allows for partial
