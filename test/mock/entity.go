@@ -11,12 +11,13 @@ import (
 )
 
 type EntityStore struct {
-	ReadEntitiesFunc      func(context.Context, string, query.Query, etre.QueryFilter) ([]etre.Entity, error)
+	ReadEntityFunc        func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error)
 	DeleteEntityLabelFunc func(context.Context, entity.WriteOp, string) (etre.Entity, error)
 	CreateEntitiesFunc    func(context.Context, entity.WriteOp, []etre.Entity) ([]string, error)
 	UpdateEntitiesFunc    func(context.Context, entity.WriteOp, query.Query, etre.Entity) ([]etre.Entity, error)
 	DeleteEntitiesFunc    func(context.Context, entity.WriteOp, query.Query) ([]etre.Entity, error)
 	DeleteLabelFunc       func(context.Context, entity.WriteOp, string) (etre.Entity, error)
+	StreamEntitiesFunc    func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan entity.EntityResult
 }
 
 func (s EntityStore) DeleteEntityLabel(ctx context.Context, wo entity.WriteOp, label string) (etre.Entity, error) {
@@ -33,9 +34,9 @@ func (s EntityStore) CreateEntities(ctx context.Context, wo entity.WriteOp, enti
 	return nil, nil
 }
 
-func (s EntityStore) ReadEntities(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
-	if s.ReadEntitiesFunc != nil {
-		return s.ReadEntitiesFunc(ctx, entityType, q, f)
+func (s EntityStore) ReadEntity(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
+	if s.ReadEntityFunc != nil {
+		return s.ReadEntityFunc(ctx, entityType, entityId, f)
 	}
 	return nil, nil
 }
@@ -59,4 +60,26 @@ func (s EntityStore) DeleteLabel(ctx context.Context, wo entity.WriteOp, label s
 		return s.DeleteLabelFunc(ctx, wo, label)
 	}
 	return etre.Entity{}, nil
+}
+
+func (s EntityStore) StreamEntities(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan entity.EntityResult {
+	if s.StreamEntitiesFunc != nil {
+		return s.StreamEntitiesFunc(ctx, entityType, q, f)
+	}
+	return DoStreamEntities(nil, nil)
+}
+
+func DoStreamEntities(entities []etre.Entity, err error) <-chan entity.EntityResult {
+	ch := make(chan entity.EntityResult)
+	go func() {
+		defer close(ch)
+		if err != nil {
+			ch <- entity.EntityResult{Err: err}
+			return
+		}
+		for _, e := range entities {
+			ch <- entity.EntityResult{Entity: e}
+		}
+	}()
+	return ch
 }

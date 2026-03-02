@@ -198,9 +198,9 @@ func TestClientQueryTimeout(t *testing.T) {
 	// and plumbed all the way down to the entity.Store context
 	var gotCtx context.Context
 	store := mock.EntityStore{}
-	store.ReadEntitiesFunc = func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
+	store.ReadEntityFunc = func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 		gotCtx = ctx
-		return testEntitiesWithObjectIDs[0:1], nil
+		return testEntitiesWithObjectIDs[0], nil
 	}
 	server := setup(t, defaultConfig, store)
 	defer server.ts.Close()
@@ -242,9 +242,13 @@ func TestContextPropagation(t *testing.T) {
 	var gotCtx context.Context
 	store := mock.EntityStore{}
 	// We're going to test all operations, so we need to set all of these funcs
-	store.ReadEntitiesFunc = func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) ([]etre.Entity, error) {
+	store.ReadEntityFunc = func(ctx context.Context, entityType string, entityId string, f etre.QueryFilter) (etre.Entity, error) {
 		gotCtx = ctx
-		return testEntitiesWithObjectIDs[0:1], nil
+		return testEntitiesWithObjectIDs[0], nil
+	}
+	store.StreamEntitiesFunc = func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan entity.EntityResult {
+		gotCtx = ctx
+		return mock.DoStreamEntities(testEntitiesWithObjectIDs[0:1], nil)
 	}
 	store.CreateEntitiesFunc = func(ctx context.Context, op entity.WriteOp, entities []etre.Entity) ([]string, error) {
 		gotCtx = ctx

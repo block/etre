@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -576,26 +577,96 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Query data store (instrumented)
 	rc.inst.Start("db")
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, f)
+	entities := api.es.StreamEntities(ctx, rc.entityType, q, f)
 	rc.inst.Stop("db")
-	if err != nil {
+
+	rc.inst.Start("encode-response")
+
+	// FinalWriter is where we will write the data. If we're using gzip compression, this will be the gzip writer. If not, it will just be the original response writer.
+	var finalWriter io.Writer
+	finalWriter = w
+
+	// gzip writer, only initialized if client accepts gzip encoding.
+	var gzw *gzip.Writer
+
+	// encoder is the JSON encoder writing to finalWriter. We initialize it after we know whether we're using gzip or not.
+	var encoder *json.Encoder
+
+	// Number of non-error records sent to the client
+	count := 0
+	for e := range entities {
+
+		// Handle errors returned by the database
+		if e.Err != nil {
+			api.readError(rc, w, e.Err)
+			return
+		}
+		// Handle context timeouts
+		if err := ctx.Err(); err != nil {
+			api.readError(rc, w, err)
+			return
+		}
+
+		// Initialize gzip writer and JSON encoder on the first record, after we know there is data to return to the client.
+		// We also check the client's Accept-Encoding header to see if gzip is supported.
+		if count == 0 && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			gzw = gzip.NewWriter(w)
+			defer gzw.Close()
+			finalWriter = gzw
+		}
+
+		// Start the JSON array if this is the first record, or put a comma separator if not the first record
+		// We don't do this before the for loop because we don't want to write the opening bracket if there is a database
+		// error in the first record returned.
+		if count == 0 {
+			finalWriter.Write([]byte("["))
+			encoder = json.NewEncoder(finalWriter)
+		} else {
+			finalWriter.Write([]byte(","))
+		}
+
+		// Write the record and handle the error.
+		// encoder.Encode will add a newline, which is fine (nice for human readable output)
+		err = encoder.Encode(e.Entity)
+		if err != nil {
+			// api.readError will mangle the response, but if the encoder failed then the response is already mangled and there's not much else we can do.
+			api.readError(rc, w, err)
+			log.Println("ERROR: Read error while encoding response: ", err)
+			return
+		}
+
+		// Count the record
+		count++
+
+		// If we're compressing, flush every 100 records to ensure data is sent to the client in a timely manner and not buffered in memory.
+		// Otherwise, the gzip flusher may buffer all the data instead of chunking.
+		if gzw != nil && count%100 == 0 {
+			gzw.Flush()
+		}
+	}
+
+	// One final check of the context timeout. If the store closed the channel because the context was canceled,
+	// we want to return an error instead of partial results.
+	if err := ctx.Err(); err != nil {
 		api.readError(rc, w, err)
 		return
 	}
-	rc.gm.Val(metrics.ReadMatch, int64(len(entities)))
 
-	// Success: return matching entities (possibly empty list)
-	rc.inst.Start("encode-response")
-	if len(entities) > 0 && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		// use gzip compression if we have data to send back and the client accepts gzip
-		w.Header().Set("Content-Encoding", "gzip")
-		gzw := gzip.NewWriter(w)
-		defer gzw.Close()
-		json.NewEncoder(gzw).Encode(entities)
+	// Clean up the JSON array
+	if count == 0 {
+		// Never saw any data. Write an empty array.
+		finalWriter.Write([]byte("[]"))
 	} else {
-		// no compression
-		json.NewEncoder(w).Encode(entities)
+		// We wrote some data, now we need to close the array
+		finalWriter.Write([]byte("]")) // end of JSON array
 	}
+
+	if gzw != nil {
+		gzw.Flush() // flush any remaining compressed data to the client
+	}
+
+	rc.gm.Val(metrics.ReadMatch, int64(count))
 	rc.inst.Stop("encode-response")
 }
 
@@ -804,18 +875,17 @@ func (api *API) getEntityHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read the entity by ID
-	q, _ := query.Translate("_id=" + rc.entityId)
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, f)
+	entity, err := api.es.ReadEntity(ctx, rc.entityType, rc.entityId, f)
 	if err != nil {
 		api.readError(rc, w, err)
 		return
 	}
-	if len(entities) == 0 {
+	if entity == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	json.NewEncoder(w).Encode(entities[0])
+	json.NewEncoder(w).Encode(entity)
 }
 
 // getLabelsHandler godoc
@@ -837,18 +907,17 @@ func (api *API) getLabelsHandler(w http.ResponseWriter, r *http.Request) {
 
 	rc.gm.Inc(metrics.ReadLabels, 1) // specific read type
 
-	q, _ := query.Translate("_id=" + rc.entityId)
-	entities, err := api.es.ReadEntities(ctx, rc.entityType, q, etre.QueryFilter{})
+	entity, err := api.es.ReadEntity(ctx, rc.entityType, rc.entityId, etre.QueryFilter{})
 	if err != nil {
 		api.readError(rc, w, err)
 		return
 	}
-	if len(entities) == 0 {
+	if entity == nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	json.NewEncoder(w).Encode(entities[0].Labels())
+	json.NewEncoder(w).Encode(entity.Labels())
 }
 
 // --------------------------------------------------------------------------
