@@ -574,6 +574,14 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 		api.readError(rc, w, ErrInvalidQuery.New("distinct requires only 1 return label but %d specified: %v", len(f.ReturnLabels), f.ReturnLabels))
 		return
 	}
+	if v, ok := qv["limit"]; ok {
+		limit, err := strconv.ParseInt(v[0], 10, 64)
+		if err != nil || limit < 0 {
+			api.readError(rc, w, ErrInvalidQuery.New("invalid limit: %s", v[0]))
+			return
+		}
+		f.Limit = limit
+	}
 
 	// Query data store (instrumented)
 	rc.inst.Start("db")

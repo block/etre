@@ -834,6 +834,86 @@ func TestDeleteLabel(t *testing.T) {
 	assert.Equal(t, expectEvent, gotEvents)
 }
 
+func TestStreamEntitiesLimit(t *testing.T) {
+	// Test that Limit caps the number of entities returned. There are 3 test
+	// nodes, so limit=2 should return only 2.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("y") // all test nodes have label "y"
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		Limit: 2,
+	}
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+}
+
+func TestStreamEntitiesLimitZeroReturnsAll(t *testing.T) {
+	// Test that Limit=0 (the default) returns all entities.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("y") // all test nodes have label "y"
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		Limit: 0,
+	}
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
+	require.NoError(t, err)
+	assert.Len(t, got, 3) // all 3 test nodes
+}
+
+func TestStreamEntitiesLimitGreaterThanResults(t *testing.T) {
+	// Test that a limit larger than the result set returns all results.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("y") // all test nodes have label "y"
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		Limit: 100,
+	}
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
+	require.NoError(t, err)
+	assert.Len(t, got, 3) // all 3 test nodes
+}
+
+func TestStreamEntitiesLimitWithReturnLabels(t *testing.T) {
+	// Test that Limit works together with ReturnLabels.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("y") // all test nodes have label "y"
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		ReturnLabels: []string{"x"},
+		Limit:        1,
+	}
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	// Should only have the "x" label
+	_, hasX := got[0]["x"]
+	assert.True(t, hasX)
+	_, hasY := got[0]["y"]
+	assert.False(t, hasY)
+}
+
+func TestStreamEntitiesLimitDistinct(t *testing.T) {
+	// Test that Limit works with the distinct optimization. There are 2 distinct
+	// values of "y" (a, b), so limit=1 should return only 1.
+	store := setup(t, &mock.CDCStore{})
+	q, err := query.Translate("y") // all test nodes have label "y"
+	require.NoError(t, err)
+
+	f := etre.QueryFilter{
+		ReturnLabels: []string{"y"},
+		Distinct:     true,
+		Limit:        1,
+	}
+	got, err := readStream(store.StreamEntities(context.Background(), entityType, q, f))
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+}
+
 func readStream(ch <-chan entity.EntityResult) ([]etre.Entity, error) {
 	entities := []etre.Entity{}
 	for r := range ch {

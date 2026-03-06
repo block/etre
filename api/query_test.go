@@ -354,6 +354,88 @@ func TestQueryErrorsTimeout(t *testing.T) {
 	assert.Equal(t, expectMetrics, server.metricsrec.Called)
 }
 
+func TestQueryLimit(t *testing.T) {
+	// Test that GET /entities/:type?query=Q&limit=N caps the result set
+	var gotFilter etre.QueryFilter
+	store := mock.EntityStore{
+		StreamEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan entity.EntityResult {
+			gotFilter = f
+			return mock.DoStreamEntities(testEntitiesWithObjectIDs, nil)
+		},
+	}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entities/" + entityType +
+		"?query=" + url.QueryEscape("a=b") + "&limit=2"
+
+	var gotEntities []etre.Entity
+	statusCode, err := test.MakeHTTPRequest("GET", etreurl, nil, &gotEntities)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, int64(2), gotFilter.Limit)
+}
+
+func TestQueryLimitZero(t *testing.T) {
+	// Test that limit=0 means no limit (backward compat with clients that don't set limit)
+	var gotFilter etre.QueryFilter
+	store := mock.EntityStore{
+		StreamEntitiesFunc: func(ctx context.Context, entityType string, q query.Query, f etre.QueryFilter) <-chan entity.EntityResult {
+			gotFilter = f
+			return mock.DoStreamEntities(testEntitiesWithObjectIDs, nil)
+		},
+	}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entities/" + entityType +
+		"?query=" + url.QueryEscape("a=b") + "&limit=0"
+
+	var gotEntities []etre.Entity
+	statusCode, err := test.MakeHTTPRequest("GET", etreurl, nil, &gotEntities)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, int64(0), gotFilter.Limit)
+}
+
+func TestQueryErrorsInvalidLimitNegative(t *testing.T) {
+	// Test that a negative limit returns HTTP 400 with an invalid-query error
+	store := mock.EntityStore{}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entities/" + entityType +
+		"?query=" + url.QueryEscape("a=b") + "&limit=-1"
+
+	var gotError etre.Error
+	statusCode, err := test.MakeHTTPRequest("GET", etreurl, nil, &gotError)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Equal(t, "invalid-query", gotError.Type)
+	assert.Contains(t, gotError.Message, "invalid limit")
+}
+
+func TestQueryErrorsInvalidLimitNonNumeric(t *testing.T) {
+	// Test that a non-numeric limit returns HTTP 400 with an invalid-query error
+	store := mock.EntityStore{}
+	server := setup(t, defaultConfig, store)
+	defer server.ts.Close()
+
+	etreurl := server.url + etre.API_ROOT + "/entities/" + entityType +
+		"?query=" + url.QueryEscape("a=b") + "&limit=abc"
+
+	var gotError etre.Error
+	statusCode, err := test.MakeHTTPRequest("GET", etreurl, nil, &gotError)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Equal(t, "invalid-query", gotError.Type)
+	assert.Contains(t, gotError.Message, "invalid limit")
+}
+
 func TestResponseCompression(t *testing.T) {
 	// Stand up the server
 	store := mock.EntityStore{
