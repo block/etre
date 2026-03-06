@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -163,6 +164,9 @@ func (c entityClient) Query(ctx context.Context, query string, filter QueryFilte
 	}
 	if filter.Distinct {
 		path += "&distinct"
+	}
+	if filter.Limit > 0 {
+		path += "&limit=" + strconv.FormatInt(filter.Limit, 10)
 	}
 
 	var entities []Entity

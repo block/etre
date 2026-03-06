@@ -216,6 +216,9 @@ type QueryFilter struct {
 	// Distinct returns unique entities if ReturnLabels contains a single value.
 	// Etre returns an error if enabled and ReturnLabels has more than one value.
 	Distinct bool
+
+	// Limit caps the number of entities returned. Zero means no limit.
+	Limit int64
 }
 
 // WriteResult represents the result of a write operation (insert, update delete).

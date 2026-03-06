@@ -422,9 +422,15 @@ func Run(ctx app.Context) {
 		os.Exit(1)
 	}
 
+	if ctx.Options.Limit < 0 {
+		fmt.Fprintf(os.Stderr, "--limit must be a non-negative integer, got %d\n", ctx.Options.Limit)
+		os.Exit(1)
+	}
+
 	f := etre.QueryFilter{
 		ReturnLabels: ctx.ReturnLabels,
 		Distinct:     ctx.Options.Unique,
+		Limit:        ctx.Options.Limit,
 	}
 
 	// Create a context with the queryTimeout
