@@ -537,6 +537,7 @@ func (api *API) id(next http.Handler) http.Handler {
 // @Param query query string true "Selector"
 // @Param labels query string false "Comma-separated list of labels to return"
 // @Param distinct query boolean false "Reduce results to one per distinct value"
+// @Param limit query integer false "Maximum number of results to return" (0 for no limit)
 // @Success 200 {array} etre.Entity "OK"
 // @Failure 400,404 {object} etre.Error
 // @Router /entities/:type [get]
