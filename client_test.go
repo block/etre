@@ -222,6 +222,56 @@ func TestQueryUnhandledError(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestQueryLimitFilter(t *testing.T) {
+	// Test that QueryFilter.Limit is serialized as a query parameter
+	setup(t)
+
+	// Set global vars used by httptest.Server
+	respData = []etre.Entity{
+		{
+			"_id":      "abc",
+			"hostname": "localhost",
+		},
+	}
+
+	ec := etre.NewEntityClient("node", ts.URL, httpClient)
+
+	ctx := testContext()
+	got, err := ec.Query(ctx, "x=y", etre.QueryFilter{Limit: 5})
+	require.NoError(t, err)
+
+	assert.Equal(t, "GET", gotMethod)
+	assert.Equal(t, etre.API_ROOT+"/entities/node", gotPath)
+	assert.Contains(t, gotQuery, "query=x=y")
+	assert.Contains(t, gotQuery, "limit=5")
+	assert.Equal(t, got, respData)
+}
+
+func TestQueryLimitFilterZeroNotSent(t *testing.T) {
+	// Test that QueryFilter.Limit=0 does not add a limit query parameter
+	setup(t)
+
+	// Set global vars used by httptest.Server
+	respData = []etre.Entity{
+		{
+			"_id":      "abc",
+			"hostname": "localhost",
+		},
+	}
+
+	ec := etre.NewEntityClient("node", ts.URL, httpClient)
+
+	ctx := testContext()
+	got, err := ec.Query(ctx, "x=y", etre.QueryFilter{Limit: 0})
+	require.NoError(t, err)
+
+	assert.Equal(t, "GET", gotMethod)
+	assert.Equal(t, etre.API_ROOT+"/entities/node", gotPath)
+	assert.Equal(t, "query=x=y", gotQuery)
+	assert.NotContains(t, gotQuery, "limit")
+	assert.Equal(t, got, respData)
+}
+
 // //////////////////////////////////////////////////////////////////////////
 // Get
 // //////////////////////////////////////////////////////////////////////////

@@ -537,6 +537,7 @@ func (api *API) id(next http.Handler) http.Handler {
 // @Param query query string true "Selector"
 // @Param labels query string false "Comma-separated list of labels to return"
 // @Param distinct query boolean false "Reduce results to one per distinct value"
+// @Param limit query integer false "Maximum number of results to return" (0 for no limit)
 // @Success 200 {array} etre.Entity "OK"
 // @Failure 400,404 {object} etre.Error
 // @Router /entities/:type [get]
@@ -573,6 +574,14 @@ func (api *API) getEntitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if f.Distinct && len(f.ReturnLabels) > 1 {
 		api.readError(rc, w, ErrInvalidQuery.New("distinct requires only 1 return label but %d specified: %v", len(f.ReturnLabels), f.ReturnLabels))
 		return
+	}
+	if v, ok := qv["limit"]; ok {
+		limit, err := strconv.ParseInt(v[0], 10, 64)
+		if err != nil || limit < 0 {
+			api.readError(rc, w, ErrInvalidQuery.New("invalid limit: %s", v[0]))
+			return
+		}
+		f.Limit = limit
 	}
 
 	// Query data store (instrumented)

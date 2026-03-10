@@ -125,7 +125,11 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 				s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query-distinct"))
 				return
 			}
-			// Distinct doesn't return a cursor, so we just have to loop and send the results
+			// Distinct doesn't return a cursor, so we just have to loop and send the results.
+			// MongoDB's distinct command doesn't support a limit option, so we apply it here.
+			if f.Limit > 0 && int64(len(values)) > f.Limit {
+				values = values[:f.Limit]
+			}
 			for _, v := range values {
 				s.writeEntityToChannel(ctx, ch, etre.Entity{f.ReturnLabels[0]: v})
 			}
@@ -148,6 +152,9 @@ func (s store) StreamEntities(ctx context.Context, entityType string, q query.Qu
 
 		// Run the query
 		opts := options.Find().SetProjection(p).SetBatchSize(int32(s.config.BatchSize))
+		if f.Limit > 0 {
+			opts.SetLimit(f.Limit)
+		}
 		cursor, err := c.Find(ctx, Filter(q), opts)
 		if err != nil {
 			s.writeErrToChannel(ctx, ch, s.dbError(ctx, err, "db-query"))

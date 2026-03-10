@@ -56,8 +56,9 @@ type Options struct {
 	Timeout      string `arg:"env:ES_TIMEOUT" yaml:"timeout"`
 	Trace        string `arg:"env:ES_TRACE" yaml:"trace"`
 	Update       bool
-	Unique       bool `arg:"-u"`
-	Version      bool `arg:"-v"`
+	Limit        int64 `arg:"--limit"`
+	Unique       bool  `arg:"-u"`
+	Version      bool  `arg:"-v"`
 	Watch        bool
 }
 
@@ -123,6 +124,7 @@ func Help() {
 		"  --insert        Insert one entity\n"+
 		"  --json          Print entities as JSON\n"+
 		"  --labels        Print label: before value\n"+
+		"  --limit         Limit the number of entities returned (default: 0, no limit)\n"+
 		"  --old           Print old values on --update\n"+
 		"  --query-timeout Query timeout on server (default: %s)\n"+
 		"  --retry         Retry count on network or API error (default: %d)\n"+
